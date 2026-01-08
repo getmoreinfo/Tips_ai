@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual env
+venv/
+
+# Environment variables
+.env
+
+# Model & training artifacts
+finetuned_e5_large/
+results/
+logs/
+
+# OS
+.DS_Store
