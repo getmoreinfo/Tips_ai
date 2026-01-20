@@ -4,16 +4,19 @@
 
 ### 컴퓨터 1 (메인 노드) - 먼저 실행:
 ```powershell
+$env:USE_LIBUV="0"
 python -m torch.distributed.launch --nproc_per_node=1 --nnodes=3 --node_rank=0 --master_addr=210.93.16.37 --master_port=29500 02_finetune_distributed.py
 ```
 
 ### 컴퓨터 2 - 컴퓨터 1 실행 직후:
 ```powershell
+$env:USE_LIBUV="0"
 python -m torch.distributed.launch --nproc_per_node=1 --nnodes=3 --node_rank=1 --master_addr=210.93.16.37 --master_port=29500 02_finetune_distributed.py
 ```
 
 ### 컴퓨터 3 - 컴퓨터 1 실행 직후:
 ```powershell
+$env:USE_LIBUV="0"
 python -m torch.distributed.launch --nproc_per_node=1 --nnodes=3 --node_rank=2 --master_addr=210.93.16.37 --master_port=29500 02_finetune_distributed.py
 ```
 

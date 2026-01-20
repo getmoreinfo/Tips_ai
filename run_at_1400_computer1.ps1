@@ -51,6 +51,7 @@ Write-Host ""
 # 실행 명령어 (Windows 멀티 노드용 - torch.distributed.launch 사용)
 $env:MASTER_ADDR = "210.93.16.37"
 $env:MASTER_PORT = "29500"
+$env:USE_LIBUV = "0"  # Windows libuv 오류 해결
 
 python -m torch.distributed.launch `
     --nproc_per_node=1 `
