@@ -34,6 +34,11 @@ print("데이터 로드")
 print("=" * 60)
 
 df = pd.read_csv('training_data_10000.csv')
+
+# category_name이 NaN인 경우 제거
+df = df.dropna(subset=['category_name'])
+df = df[df['category_name'].notna()]
+
 print(f"총 데이터: {len(df):,}개")
 print(f"카테고리 수: {df['category_name'].nunique()}개")
 
@@ -121,7 +126,8 @@ print("\n" + "=" * 60)
 print("레이블 매핑 생성")
 print("=" * 60)
 
-category_names = sorted(df['category_name'].unique())
+# NaN 값을 제거하고 정렬
+category_names = sorted([cat for cat in df['category_name'].unique() if pd.notna(cat)])
 category_to_label = {cat_name: idx for idx, cat_name in enumerate(category_names)}
 label_to_category = {idx: cat_name for cat_name, idx in category_to_label.items()}
 
