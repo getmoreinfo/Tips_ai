@@ -12,7 +12,12 @@ venv/
 finetuned_e5_large/
 results/
 results_test/
+results_category/
 logs/
+logs_category/
+
+# Large data files
+products_all.csv
 
 # OS
 .DS_Store

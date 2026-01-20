@@ -1,5 +1,5 @@
-# 02_finetune_local.py
-# 전체 코드
+# 05_train_category_classifier.py
+# 역할: products_all.csv 데이터로 상품명(name) -> 카테고리(category) 분류 모델 학습
 
 import torch
 import pandas as pd
@@ -10,10 +10,11 @@ from transformers import (
     AutoTokenizer, 
     AutoModelForSequenceClassification,
     TrainingArguments,
-    Trainer
+    Trainer,
+    EarlyStoppingCallback
 )
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, f1_score, classification_report
+from sklearn.metrics import accuracy_score, f1_score
 import os
 
 # GPU 확인
@@ -33,23 +34,33 @@ print("=" * 60)
 print("데이터 로드")
 print("=" * 60)
 
-df = pd.read_csv('training_data_10000.csv')
+df = pd.read_csv('products_all.csv')
 
-# category_name이 NaN인 경우 제거
-df = df.dropna(subset=['category_name'])
-df = df[df['category_name'].notna()]
+# 필요한 컬럼만 선택
+df = df[['id', 'category_id', 'category', 'name', 'manufacturer']].copy()
+
+# 결측값 제거
+df = df.dropna(subset=['category', 'name'])
+df = df[df['category'].notna() & df['name'].notna()]
+
+# manufacturer가 없는 경우 빈 문자열로 대체
+df['manufacturer'] = df['manufacturer'].fillna('')
+
+# 학습용 텍스트 생성: 상품명 + 제조사
+df['text'] = df['name'] + ' | ' + df['manufacturer']
 
 print(f"총 데이터: {len(df):,}개")
-print(f"카테고리 수: {df['category_name'].nunique()}개")
+print(f"카테고리 수: {df['category'].nunique()}개")
 
-# 카테고리별 최소/최대 샘플 수
-category_counts = df['category_name'].value_counts()
-print(f"최소 샘플 수: {category_counts.min()}개 (카테고리: {category_counts.idxmin()})")
-print(f"최대 샘플 수: {category_counts.max()}개 (카테고리: {category_counts.idxmax()})")
+# 카테고리별 샘플 수 확인
+category_counts = df['category'].value_counts()
+print(f"최소 샘플 수: {category_counts.min()}개 (카테고리: {category_counts.idxmin()[:50]}...)")
+print(f"최대 샘플 수: {category_counts.max()}개 (카테고리: {category_counts.idxmax()[:50]}...)")
 print(f"평균 샘플 수: {category_counts.mean():.1f}개")
+print()
 
 # 2. Train/Validation/Test 분할
-print("\n" + "=" * 60)
+print("=" * 60)
 print("데이터 분할")
 print("=" * 60)
 
@@ -57,7 +68,6 @@ print("=" * 60)
 train_df, temp_df = train_test_split(
     df, 
     test_size=0.2, 
-    #stratify=df['category_name'], 
     random_state=42
 )
 
@@ -65,7 +75,6 @@ train_df, temp_df = train_test_split(
 val_df, test_df = train_test_split(
     temp_df,
     test_size=0.5,
-    #stratify=temp_df['category_name'],
     random_state=42
 )
 
@@ -74,17 +83,17 @@ print(f"검증 데이터: {len(val_df):,}개 (10%)")
 print(f"테스트 데이터: {len(test_df):,}개 (10%)")
 
 # Dataset 변환
-train_dataset = Dataset.from_pandas(train_df[['text', 'category_name']].reset_index(drop=True))
-val_dataset = Dataset.from_pandas(val_df[['text', 'category_name']].reset_index(drop=True))
-test_dataset = Dataset.from_pandas(test_df[['text', 'category_name']].reset_index(drop=True))
+train_dataset = Dataset.from_pandas(train_df[['text', 'category']].reset_index(drop=True))
+val_dataset = Dataset.from_pandas(val_df[['text', 'category']].reset_index(drop=True))
+test_dataset = Dataset.from_pandas(test_df[['text', 'category']].reset_index(drop=True))
 
 # 3. 모델 및 토크나이저 로드
 print("\n" + "=" * 60)
 print("모델 로드")
 print("=" * 60)
 
-model_name = "intfloat/multilingual-e5-base"  # large -> base (8GB GPU 메모리 부족 해결)
-num_labels = df['category_name'].nunique()
+model_name = "intfloat/multilingual-e5-base"  # 8GB GPU에 적합한 모델
+num_labels = df['category'].nunique()
 
 print(f"모델: {model_name}")
 print(f"분류 라벨 수: {num_labels}개")
@@ -105,12 +114,14 @@ print("\n" + "=" * 60)
 print("토크나이징")
 print("=" * 60)
 
+MAX_LENGTH = 128  # 메모리 안정성을 위해 128 유지
+
 def tokenize_function(examples):
     return tokenizer(
         examples['text'], 
         padding='max_length', 
         truncation=True, 
-        max_length=64  # 메모리 절약: 128 -> 64로 감소
+        max_length=MAX_LENGTH
     )
 
 print("학습 데이터 토크나이징 중...")
@@ -126,8 +137,8 @@ print("\n" + "=" * 60)
 print("레이블 매핑 생성")
 print("=" * 60)
 
-# NaN 값을 제거하고 정렬
-category_names = sorted([cat for cat in df['category_name'].unique() if pd.notna(cat)])
+# 카테고리명을 정렬하여 일관된 매핑 생성
+category_names = sorted([cat for cat in df['category'].unique() if pd.notna(cat)])
 category_to_label = {cat_name: idx for idx, cat_name in enumerate(category_names)}
 label_to_category = {idx: cat_name for cat_name, idx in category_to_label.items()}
 
@@ -139,7 +150,7 @@ if len(category_to_label) > 5:
     print(f"  ... 외 {len(category_to_label) - 5}개")
 
 def convert_labels(examples):
-    examples['labels'] = [category_to_label[cat_name] for cat_name in examples['category_name']]
+    examples['labels'] = [category_to_label[cat_name] for cat_name in examples['category']]
     return examples
 
 train_dataset = train_dataset.map(convert_labels, batched=True)
@@ -170,45 +181,51 @@ print(f"CUDA 사용 가능: {torch.cuda.is_available()}")
 print(f"FP16 사용: {use_fp16}")
 
 training_args = TrainingArguments(
-    output_dir='./results',
+    output_dir='./results_category',
     
-    per_device_train_batch_size=2,  # 메모리 부족 해결: 8 -> 2로 감소
-    per_device_eval_batch_size=4,   # 메모리 부족 해결: 16 -> 4로 감소
-    gradient_accumulation_steps=16, # 효과적 배치 사이즈 유지: 2 * 16 = 32
+    per_device_train_batch_size=4,   # 배치 사이즈
+    per_device_eval_batch_size=8,    # 평가시에는 더 큰 배치 가능
+    gradient_accumulation_steps=8,   # 효과적 배치 사이즈: 4 * 8 = 32
     
     # CUDA 사용 가능 여부에 따라 fp16 자동 설정
     fp16=use_fp16,
     
-    learning_rate=2e-5,
-    num_train_epochs=3,
+    learning_rate=3e-5,              # 2e-5 → 3e-5로 증가
+    num_train_epochs=7,              # 3 → 7로 증가 (Early Stopping으로 자동 중단)
     weight_decay=0.01,
     
     eval_strategy='epoch',
     save_strategy='epoch',
     load_best_model_at_end=True,
     metric_for_best_model='accuracy',
+    greater_is_better=True,
     
-    logging_dir='./logs',
-    logging_steps=10,
+    logging_dir='./logs_category',
+    logging_steps=50,
     logging_first_step=True,
     report_to='none',
     
-    save_total_limit=2,
-    dataloader_num_workers=0,  # Windows 안정성을 위해 0으로 설정
-    warmup_steps=50,
+    save_total_limit=1,              # 3 → 1 (메모리 절약: 체크포인트 최소화)
+    dataloader_num_workers=0,        # Windows 안정성을 위해 0으로 설정
+    warmup_steps=150,
     disable_tqdm=False,
+    
+    # 메모리 절약 옵션
+    optim="adamw_torch",             # 기본 옵티마이저 명시
+    save_safetensors=False,          # safetensors 대신 pytorch 형식으로 저장 (메모리 절약)
 )
 
 print(f"효과적 배치 사이즈: {training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps}")
 print(f"모드: {'GPU (FP16)' if use_fp16 else 'CPU/GPU (FP32)'}")
 
-# 8. Trainer 생성
+# 8. Trainer 생성 (Early Stopping 포함)
 trainer = Trainer(
     model=model,
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=val_dataset,
     compute_metrics=compute_metrics,
+    callbacks=[EarlyStoppingCallback(early_stopping_patience=2)]  # 2 epoch 동안 개선 없으면 중단
 )
 
 # 9. 학습 시작
@@ -242,7 +259,7 @@ try:
     print("모델 저장")
     print("=" * 60)
     
-    save_dir = './results/finetuned_e5_large'
+    save_dir = './results_category/finetuned_category_classifier'
     os.makedirs(save_dir, exist_ok=True)
     
     model.save_pretrained(save_dir)
@@ -259,8 +276,9 @@ try:
         'test_accuracy': float(test_accuracy),
         'test_f1': float(test_f1),
         'model_name': model_name,
-        'max_length': 64,
+        'max_length': MAX_LENGTH,
         'epochs': training_args.num_train_epochs,
+        'total_categories': len(category_names),
     }
     
     with open(f'{save_dir}/metadata.json', 'w', encoding='utf-8') as f:
@@ -270,7 +288,11 @@ try:
     print("\n" + "=" * 60)
     print("Fine-tuning 완료")
     print("=" * 60)
-    print("다음 단계: python 03_use_finetuned_model.py 실행")
+    print("다음 단계: python 06_use_category_classifier.py 실행")
     
 except KeyboardInterrupt:
     print("\n학습이 중단되었습니다.")
+except Exception as e:
+    print(f"\n[ERROR] 학습 중 오류 발생: {e}")
+    import traceback
+    traceback.print_exc()
