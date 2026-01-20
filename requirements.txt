@@ -1,0 +1,24 @@
+# AI Training Project - 필수 패키지 (컴퓨터 1에서 테스트된 버전)
+# Python 버전: 3.11.7 (모든 컴퓨터에서 동일하게 맞춰주세요!)
+
+# PyTorch (CUDA 11.8 지원)
+# 설치 명령: pip install torch==2.7.1+cu118 torchvision==0.22.1+cu118 torchaudio==2.7.1+cu118 --index-url https://download.pytorch.org/whl/cu118
+torch==2.7.1+cu118
+torchvision==0.22.1+cu118
+torchaudio==2.7.1+cu118
+
+# HuggingFace 및 학습 관련
+transformers==4.57.6
+datasets==4.5.0
+accelerate==1.12.0
+
+# 데이터 처리
+pandas==2.3.3
+numpy==2.3.5
+scikit-learn==1.8.0
+
+# 데이터베이스 연결
+psycopg2-binary==2.9.11
+
+# 환경 변수 관리
+python-dotenv==1.2.1
