@@ -46,5 +46,14 @@ Write-Host "컴퓨터 3 실행 시작: $(Get-Date)"
 Write-Host "=========================================="
 Write-Host ""
 
-# 실행 명령어
-py -3.11 -m accelerate.commands.launch 02_finetune_local.py
+# 실행 명령어 (Windows 멀티 노드용 - torch.distributed.launch 사용)
+$env:MASTER_ADDR = "210.93.16.37"
+$env:MASTER_PORT = "29500"
+
+python -m torch.distributed.launch `
+    --nproc_per_node=1 `
+    --nnodes=3 `
+    --node_rank=2 `
+    --master_addr=$env:MASTER_ADDR `
+    --master_port=$env:MASTER_PORT `
+    02_finetune_distributed.py
