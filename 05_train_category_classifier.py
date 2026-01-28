@@ -92,7 +92,7 @@ print("\n" + "=" * 60)
 print("모델 로드")
 print("=" * 60)
 
-model_name = "intfloat/multilingual-e5-base"  # 8GB GPU에 적합한 모델
+model_name = "klue/roberta-base"  # 한국어 전용 모델 (KLUE 벤치마크 1위)
 num_labels = df['category'].nunique()
 
 print(f"모델: {model_name}")
@@ -183,12 +183,13 @@ print(f"FP16 사용: {use_fp16}")
 training_args = TrainingArguments(
     output_dir='./results_category',
     
-    per_device_train_batch_size=4,   # 배치 사이즈
-    per_device_eval_batch_size=8,    # 평가시에는 더 큰 배치 가능
-    gradient_accumulation_steps=8,   # 효과적 배치 사이즈: 4 * 8 = 32
+    per_device_train_batch_size=2,   # 배치 사이즈 (메모리 절약)
+    per_device_eval_batch_size=4,    # 평가시에는 더 큰 배치 가능
+    gradient_accumulation_steps=16,  # 효과적 배치 사이즈: 2 * 16 = 32
     
-    # CUDA 사용 가능 여부에 따라 fp16 자동 설정
-    fp16=use_fp16,
+    # FP16 비활성화 (CUDA 오류 방지)
+    fp16=False,
+    bf16=False,
     
     learning_rate=3e-5,              # 2e-5 → 3e-5로 증가
     num_train_epochs=7,              # 3 → 7로 증가 (Early Stopping으로 자동 중단)

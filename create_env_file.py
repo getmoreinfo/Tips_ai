@@ -27,9 +27,10 @@ PGDATABASE=your_database_name
 PGUSER=your_username
 PGPASSWORD=your_password
 
-# 테이블 설정
+# 테이블 설정 (products / reviews 둘 다 사용하는 스크립트용)
 PGSCHEMA=public1
 PGTABLE=products
+PGREVIEWSTABLE=reviews
 """
     
     # .env 파일 작성

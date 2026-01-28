@@ -11,6 +11,7 @@ venv/
 # Model & training artifacts
 finetuned_e5_large/
 results/
+results_*/
 results_test/
 results_category/
 logs/

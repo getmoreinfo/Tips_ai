@@ -28,6 +28,9 @@ try:
     print(f"  PGDATABASE: {db_config['database']}")
     print(f"  PGUSER: {db_config['user']}")
     print(f"  PGPASSWORD: {'*' * len(db_config['password']) if db_config['password'] else 'None'}")
+    print(f"  PGSCHEMA: {os.getenv('PGSCHEMA', 'public1')}")
+    print(f"  PGTABLE: {os.getenv('PGTABLE', 'products')}")
+    print(f"  PGREVIEWSTABLE: {os.getenv('PGREVIEWSTABLE', 'reviews')}")
     print()
     
     # PostgreSQL 연결
@@ -72,7 +75,31 @@ try:
     for idx, row in enumerate(results, 1):
         print(f"  [{idx}] id={row[0]}, category={row[1]}, name={row[2][:50] if row[2] else 'None'}...")
     print()
-    print("[OK] 테이블 조회 성공")
+    print("[OK] products 테이블 조회 성공")
+    print()
+    
+    # reviews 테이블 샘플 조회 (PGREVIEWSTABLE 사용)
+    reviews_table = os.getenv('PGREVIEWSTABLE', 'reviews')
+    print("=" * 60)
+    print(f"테이블 샘플 조회: {schema}.{reviews_table}")
+    print("=" * 60)
+    query_rev = f"""
+    SELECT id, product_id, rating
+    FROM {schema}.{reviews_table}
+    LIMIT 3
+    """
+    try:
+        cur.execute(query_rev)
+        results_rev = cur.fetchall()
+        print(f"조회된 레코드 수: {len(results_rev)}개")
+        print()
+        print("결과:")
+        for idx, row in enumerate(results_rev, 1):
+            print(f"  [{idx}] id={row[0]}, product_id={row[1]}, rating={row[2]}")
+        print()
+        print("[OK] reviews 테이블 조회 성공")
+    except psycopg2.Error as e:
+        print(f"[WARN] reviews 테이블 조회 실패 (테이블/컬럼 확인): {e}")
     print()
     
     # 커서 및 연결 종료
@@ -82,7 +109,8 @@ try:
     print("=" * 60)
     print("모든 테스트 완료")
     print("=" * 60)
-    print("다음 단계: python 01_export_sample_10000.py 실행")
+    print("다음 단계: python export_all_products.py / export_reviews_all.py 또는")
+    print("         python generate_category_bullets_from_db.py --category_contains 유모차")
     
 except psycopg2.Error as e:
     print(f"[ERROR] 데이터베이스 오류: {e}")
