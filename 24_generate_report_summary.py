@@ -17,7 +17,7 @@ import json
 import os
 import re
 import sys
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import torch
@@ -94,9 +94,11 @@ def _extract_json(text: str) -> Optional[Dict[str, Any]]:
 def _looks_like_json_object_string(s: Any) -> bool:
     if not isinstance(s, str):
         return False
-    ss = s.strip()
-    return ss.startswith("{") and ss.endswith("}") and (
-        "\"marketOverviewSummary\"" in ss or "\"growthSummary\"" in ss
+    ss = s.strip().replace("<|im_end|>", "").strip()
+    while ss.endswith('"') or ss.endswith("\\"):
+        ss = ss[:-1].strip()
+    return ss.startswith("{") and (
+        ss.endswith("}") or "\"marketOverviewSummary\"" in ss or "\"growthSummary\"" in ss
     )
 
 
@@ -130,25 +132,50 @@ def _clean_summary_text(s: str, max_sentences: int = 12) -> str:
                         break
             break
 
-    # 중괄호로 감싸진 JSON 문자열이 남아 있으면 내용만 추출
-    if s.strip().startswith("{") and '"marketOverviewSummary"' in s:
-        try:
-            start = s.find("{")
-            depth = 0
-            for i in range(start, len(s)):
-                if s[i] == "{":
-                    depth += 1
-                elif s[i] == "}":
-                    depth -= 1
-                    if depth == 0:
-                        obj = json.loads(s[start : i + 1])
-                        if isinstance(obj.get("marketOverviewSummary"), str):
-                            s = obj["marketOverviewSummary"]
-                        elif isinstance(obj.get("growthSummary"), str):
-                            s = obj["growthSummary"]
-                        break
-        except Exception:
-            pass
+    # "{\"marketOverviewSummary\":\"한국어...群중국어" 형태: 첫 번째 값만 추출 (파싱 불가 시)
+    if s.strip().startswith("{") and ("marketOverviewSummary" in s or "growthSummary" in s):
+        key = "marketOverviewSummary"
+        for key_pattern in (f'"{key}"', f'\\"{key}\\"'):
+            pos = s.find(key_pattern)
+            if pos != -1:
+                break
+        if pos != -1:
+            # 값 시작: ": " 또는 \":\" 다음의 따옴표 뒤
+            after_key = pos + len(key_pattern)
+            val_start = -1
+            for q in ('": "', '\\":\\"', '":"'):
+                i = s.find(q, after_key)
+                if i != -1:
+                    val_start = i + len(q)
+                    break
+            if val_start > 0:
+                end_markers = ["群", "与你", "\", \"growthSummary\"", "\\\", \\\"growthSummary\\\"", "\", \"marketOverviewSummary\""]
+                val_end = len(s)
+                for m in end_markers:
+                    i = s.find(m, val_start)
+                    if i != -1:
+                        val_end = min(val_end, i)
+                chunk = s[val_start:val_end].strip()
+                if len(chunk) > 30 and any("\uac00" <= c <= "\ud7a3" for c in chunk):
+                    s = chunk
+        if s.strip().startswith("{"):
+            try:
+                start = s.find("{")
+                depth = 0
+                for i in range(start, len(s)):
+                    if s[i] == "{":
+                        depth += 1
+                    elif s[i] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            obj = json.loads(s[start : i + 1])
+                            if isinstance(obj.get("marketOverviewSummary"), str):
+                                s = obj["marketOverviewSummary"]
+                            elif isinstance(obj.get("growthSummary"), str):
+                                s = obj["growthSummary"]
+                            break
+            except Exception:
+                pass
 
     # 문장 단위로 나누어 중복·과도한 반복 제거 후 재결합 (숫자 내 . 은 유지)
     raw_sentences = re.split(r"(?<=[가-힣a-zA-Z])\s*[.。]\s+", s)
@@ -181,14 +208,19 @@ def _normalize_result_obj(obj: Dict[str, Any]) -> Dict[str, Any]:
     """
     out: Dict[str, Any] = dict(obj)
 
-    # 1) 다중 중첩 JSON 문자열 풀기 (최대 3단계)
+    # 1) 다중 중첩 JSON 문자열 풀기 (최대 3단계), 끝의 <|im_end|>·따옴표 제거 후 파싱 시도
     for _ in range(3):
         changed = False
         for k in ("marketOverviewSummary", "growthSummary"):
             v = out.get(k)
-            if _looks_like_json_object_string(v):
+            if not isinstance(v, str):
+                continue
+            v_strip = v.strip().replace("<|im_end|>", "").strip()
+            while v_strip.endswith('"') or v_strip.endswith("\\"):
+                v_strip = v_strip[:-1].strip()
+            if _looks_like_json_object_string(v_strip):
                 try:
-                    nested = json.loads(str(v))
+                    nested = json.loads(v_strip)
                     if isinstance(nested, dict):
                         for nk in ("marketOverviewSummary", "growthSummary"):
                             if nk in nested and isinstance(nested[nk], str):
@@ -266,6 +298,14 @@ def _coerce_to_result_json(raw: str) -> Dict[str, Any]:
     return {"marketOverviewSummary": mo, "growthSummary": gr}
 
 
+def _review_text_column(df: pd.DataFrame) -> Optional[str]:
+    """리뷰 본문 컬럼명 찾기 (review_text 우선, 다른 이름 허용)."""
+    for col in ("review_text", "review_content", "content", "text", "body"):
+        if col in df.columns:
+            return col
+    return None
+
+
 def _build_review_insights_for_inference(
     df_reviews: pd.DataFrame,
     *,
@@ -276,7 +316,8 @@ def _build_review_insights_for_inference(
 ) -> Optional[Dict[str, Any]]:
     if df_reviews is None or df_reviews.empty:
         return None
-    if "review_text" not in df_reviews.columns:
+    text_col = _review_text_column(df_reviews)
+    if text_col is None:
         return None
 
     def _trunc(s: Any) -> str:
@@ -286,7 +327,8 @@ def _build_review_insights_for_inference(
             return ss[: max_example_chars - 1] + "…"
         return ss
 
-    texts = df_reviews["review_text"].dropna().astype(str).map(_trunc).tolist()
+    texts = df_reviews[text_col].dropna().astype(str).map(_trunc).tolist()
+    texts = [t for t in texts if len(t.strip()) > 0]
     if not texts:
         return None
 
@@ -297,10 +339,10 @@ def _build_review_insights_for_inference(
     df_neg = df_reviews[rating.notna() & (rating <= 2)]
 
     def _take_top(dff: pd.DataFrame, n: int) -> List[str]:
-        if n <= 0 or dff.empty:
+        if n <= 0 or dff.empty or text_col not in dff.columns:
             return []
-        arr = dff["review_text"].dropna().astype(str).map(_trunc).tolist()
-        return arr[:n]
+        arr = dff[text_col].dropna().astype(str).map(_trunc).tolist()
+        return [t for t in arr if t.strip()][:n]
 
     return {
         "topKeywords": list(kws),
@@ -483,7 +525,12 @@ def main() -> None:
         user_input["reviewInsights"] = ri
         print(f"[DEBUG] reviewInsights 포함됨: 키워드 {len(ri.get('topKeywords', []))}개, 긍정예시 {len(ri.get('positiveExamples', []))}개, 부정예시 {len(ri.get('negativeExamples', []))}개")
     else:
-        print("[DEBUG] reviewInsights 없음 (리뷰 텍스트 없거나 빈 데이터)")
+        text_col = _review_text_column(df_reviews) if df_reviews is not None and not df_reviews.empty else None
+        n_reviews = len(df_reviews) if df_reviews is not None else 0
+        n_nonempty = 0
+        if text_col is not None and df_reviews is not None and not df_reviews.empty:
+            n_nonempty = int((df_reviews[text_col].dropna().astype(str).str.strip() != "").sum())
+        print(f"[DEBUG] reviewInsights 없음: 카테고리 리뷰 수={n_reviews}, 리뷰텍스트 컬럼={text_col!r}, 비어있지 않은 텍스트 수={n_nonempty}")
 
     # 시스템 프롬프트 (학습 시와 동일)
     system_prompt = (
