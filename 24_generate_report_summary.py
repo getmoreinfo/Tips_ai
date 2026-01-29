@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from typing import Any, Dict, Optional, Tuple
 
@@ -99,33 +100,111 @@ def _looks_like_json_object_string(s: Any) -> bool:
     )
 
 
+def _clean_summary_text(s: str, max_sentences: int = 12) -> str:
+    """
+    모델이 출력한 요약 문자열 정리:
+    - <|im_end|> 제거, 그 이후 버림
+    - 중국어 블록 제거 또는 그 이전까지만 유지
+    - 첫 번째 한국어 요약 블록 우선 사용, 중복 문장 정리
+    """
+    if not s or not isinstance(s, str):
+        return ""
+    s = s.strip()
+    # 토큰 및 그 이후 버리기
+    if "<|im_end|>" in s:
+        s = s.split("<|im_end|>")[0].strip()
+    s = s.replace("<|im_end|>", "").strip()
+
+    # 중국어 등장 지점에서 잘라서 앞쪽(한국어)만 사용
+    for sep in ("与你提供的", "对应的", "分析如下", "市场概况", "增长概况", "群与"):
+        if sep in s:
+            idx = s.find(sep)
+            if idx > 50:
+                s = s[:idx].strip()
+            else:
+                s = s[idx + len(sep) :].strip()
+                for start in ("본 ", "그림", "전체", "리뷰", "이 ", "연도", "대리"):
+                    j = s.find(start)
+                    if j != -1:
+                        s = s[j:]
+                        break
+            break
+
+    # 중괄호로 감싸진 JSON 문자열이 남아 있으면 내용만 추출
+    if s.strip().startswith("{") and '"marketOverviewSummary"' in s:
+        try:
+            start = s.find("{")
+            depth = 0
+            for i in range(start, len(s)):
+                if s[i] == "{":
+                    depth += 1
+                elif s[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        obj = json.loads(s[start : i + 1])
+                        if isinstance(obj.get("marketOverviewSummary"), str):
+                            s = obj["marketOverviewSummary"]
+                        elif isinstance(obj.get("growthSummary"), str):
+                            s = obj["growthSummary"]
+                        break
+        except Exception:
+            pass
+
+    # 문장 단위로 나누어 중복·과도한 반복 제거 후 재결합 (숫자 내 . 은 유지)
+    raw_sentences = re.split(r"(?<=[가-힣a-zA-Z])\s*[.。]\s+", s)
+    raw_sentences = [t.strip() for t in raw_sentences if t.strip()]
+    sentences = []
+    seen = set()
+    for sent in raw_sentences:
+        sent = sent.strip()
+        if not sent or len(sent) < 10:
+            continue
+        key = sent[:50]
+        if key in seen:
+            continue
+        seen.add(key)
+        sentences.append(sent)
+        if len(sentences) >= max_sentences:
+            break
+
+    out = ". ".join(sentences)
+    if out and not out.endswith("."):
+        out = out + "."
+    return " ".join(out.split())
+
+
 def _normalize_result_obj(obj: Dict[str, Any]) -> Dict[str, Any]:
     """
     모델 출력이 깨지는 케이스를 최대한 복구:
-    - marketOverviewSummary 값이 JSON 문자열(\"{...}\") 형태로 중첩됨
-    - 문자열 안에 <|im_end|> 같은 토큰이 섞임
+    - marketOverviewSummary 값이 JSON 문자열(\"{...}\") 형태로 다중 중첩
+    - 문자열 안에 <|im_end|>, 중국어 혼입
     """
     out: Dict[str, Any] = dict(obj)
 
-    # 1) 중첩 JSON 문자열 풀기
-    for k in ("marketOverviewSummary", "growthSummary"):
-        v = out.get(k)
-        if _looks_like_json_object_string(v):
-            try:
-                nested = json.loads(str(v))
-                if isinstance(nested, dict):
-                    for nk in ("marketOverviewSummary", "growthSummary"):
-                        if nk in nested and isinstance(nested[nk], str):
-                            out[nk] = nested[nk]
-            except Exception:
-                pass
+    # 1) 다중 중첩 JSON 문자열 풀기 (최대 3단계)
+    for _ in range(3):
+        changed = False
+        for k in ("marketOverviewSummary", "growthSummary"):
+            v = out.get(k)
+            if _looks_like_json_object_string(v):
+                try:
+                    nested = json.loads(str(v))
+                    if isinstance(nested, dict):
+                        for nk in ("marketOverviewSummary", "growthSummary"):
+                            if nk in nested and isinstance(nested[nk], str):
+                                out[nk] = nested[nk]
+                                changed = True
+                        break
+                except Exception:
+                    pass
+        if not changed:
+            break
 
-    # 2) 문자열 정리
+    # 2) 문자열 정리: 토큰 제거, 중국어 구간 제거, 중복 문장 정리
     for k in ("marketOverviewSummary", "growthSummary"):
         v = out.get(k)
         if isinstance(v, str):
-            vv = v.replace("<|im_end|>", "").strip()
-            out[k] = " ".join(vv.split())
+            out[k] = _clean_summary_text(v)
 
     # 3) 최소 키 보장
     if "marketOverviewSummary" not in out or not isinstance(out["marketOverviewSummary"], str):
@@ -402,6 +481,9 @@ def main() -> None:
     ri = _build_review_insights_for_inference(df_reviews)
     if ri:
         user_input["reviewInsights"] = ri
+        print(f"[DEBUG] reviewInsights 포함됨: 키워드 {len(ri.get('topKeywords', []))}개, 긍정예시 {len(ri.get('positiveExamples', []))}개, 부정예시 {len(ri.get('negativeExamples', []))}개")
+    else:
+        print("[DEBUG] reviewInsights 없음 (리뷰 텍스트 없거나 빈 데이터)")
 
     # 시스템 프롬프트 (학습 시와 동일)
     system_prompt = (

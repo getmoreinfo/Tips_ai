@@ -93,6 +93,7 @@ print('GPU:', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.
 
 ```python
 %cd /content/tips_ai
+# 기본 (리뷰 텍스트 인사이트 없음)
 !python 22_prepare_report_summary_sft.py \
   --input_csv products_all.csv \
   --reviews_csv reviews_all.csv \
@@ -102,7 +103,23 @@ print('GPU:', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.
 !head -n 1 training_report_summary_sft.jsonl
 ```
 
-- **이걸 실행했으면** 4번에서 `--train_jsonl training_report_summary_sft.jsonl` 로 바꿔서 사용.
+**리뷰 텍스트 인사이트 포함 (권장):**
+```python
+%cd /content/tips_ai
+!python 22_prepare_report_summary_sft.py \
+  --input_csv products_all.csv \
+  --reviews_csv reviews_all.csv \
+  --out_jsonl training_report_summary_sft_reviews.jsonl \
+  --samples_per_category 50 \
+  --min_products 10 \
+  --use_review_text \
+  --review_top_keywords 10 \
+  --review_pos_examples 3 \
+  --review_neg_examples 2
+!head -n 1 training_report_summary_sft_reviews.jsonl
+```
+
+- **이걸 실행했으면** 4번에서 `--train_jsonl training_report_summary_sft.jsonl` (또는 `training_report_summary_sft_reviews.jsonl`) 로 바꿔서 사용.
 
 ---
 
