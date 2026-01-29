@@ -1,0 +1,4 @@
+# 21_export_products_reviews_from_db.py / DB 로더용
+pandas>=1.5.0
+psycopg2-binary>=2.9.0
+python-dotenv>=1.0.0

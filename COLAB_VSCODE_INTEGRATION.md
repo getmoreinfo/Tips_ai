@@ -1,11 +1,14 @@
 # Google Colab + VSCode 연동 가이드
 
+> **최신:** Colab ↔ Cursor 워크플로우(코드 작성 → Colab 학습)는 **`COLAB_CURSOR_WORKFLOW.md`**를 참고하세요.
+
 ## 연동 방법 개요
 
 Google Colab과 VSCode를 연동하는 방법은 여러 가지가 있습니다:
 
-### 방법 1: Colab Code (공식 확장) - 추천
-- VSCode에서 직접 Colab 노트북을 열고 실행
+### 방법 1: Google Colab (공식 확장) - 추천
+- 확장명: **Google Colab** (`Google.colab`). 구 "Colab Code" 후속.
+- VSCode/Cursor에서 `.ipynb` 열고 **Select Kernel → Colab** 선택 후 실행
 - 가장 공식적이고 안정적
 
 ### 방법 2: Remote SSH (간접적)
@@ -18,24 +21,24 @@ Google Colab과 VSCode를 연동하는 방법은 여러 가지가 있습니다:
 
 ---
 
-## 방법 1: Colab Code 확장 사용 (가장 추천)
+## 방법 1: Google Colab 확장 사용 (가장 추천)
 
-### Step 1: VSCode 확장 설치
-1. VSCode 열기
-2. Extensions (Ctrl+Shift+X)
-3. "Colab Code" 검색 및 설치
-4. 또는 직접 설치: https://marketplace.visualstudio.com/items?itemName=Google.colabcode
+### Step 1: VSCode/Cursor 확장 설치
+1. VSCode 또는 Cursor 열기
+2. Extensions (Ctrl+Shift+X / Cmd+Shift+X)
+3. **"Google Colab"** 검색 및 설치
+4. 또는 직접 설치: https://marketplace.visualstudio.com/items?itemName=Google.colab
 
-### Step 2: Colab 노트북 열기
-1. VSCode에서 `Ctrl+Shift+P` (또는 `Cmd+Shift+P` on Mac)
-2. "Colab: Open Notebook" 입력
-3. Google Drive의 `.ipynb` 파일 선택
-4. 또는 URL로 직접 열기
+### Step 2: Colab 노트북 사용
+1. `.ipynb` 파일 열기 (로컬 또는 Drive)
+2. 우측 상단 **Select Kernel** 클릭 → **Colab** 선택
+3. Google 로그인 후 런타임(CPU/GPU/TPU) 선택
+4. 또는 `Ctrl+Shift+P` → "Colab: Open Notebook"으로 Drive 노트 열기
 
 ### Step 3: 사용 방법
-- VSCode에서 Colab 노트북을 직접 편집
-- 셀 실행은 Colab 런타임 사용
-- 파일 편집은 VSCode 기능 활용
+- VSCode/Cursor에서 노트북 편집
+- 셀 실행은 **Colab 클라우드 런타임**에서 동작
+- 파일 편집·Git·AI 등은 에디터 기능 활용
 
 ### 장점
 - ✅ VSCode의 모든 기능 사용 가능
@@ -76,15 +79,14 @@ setup_ssh(ngrok_region="us")
 
 ### Cursor는 VSCode 기반이므로 동일하게 작동합니다!
 
-### Step 1: Cursor에서 Colab Code 확장 설치
+### Step 1: Cursor에서 Google Colab 확장 설치
 1. Cursor 열기
-2. Extensions (Ctrl+Shift+X)
-3. "Colab Code" 검색 및 설치
+2. Extensions (Ctrl+Shift+X / Cmd+Shift+X)
+3. **"Google Colab"** 검색 및 설치
 
-### Step 2: Colab 노트북 열기
-1. `Ctrl+Shift+P`
-2. "Colab: Open Notebook"
-3. `.ipynb` 파일 선택
+### Step 2: Colab 노트북 사용
+1. `.ipynb` 열기 → **Select Kernel → Colab**
+2. 또는 `Ctrl+Shift+P` → "Colab: Open Notebook" → Drive에서 선택
 
 ### Step 3: Cursor AI 기능 활용
 - Cursor의 AI 기능으로 코드 작성
@@ -145,11 +147,11 @@ Ctrl+Shift+P → "Colab: Open Notebook"
 
 ## 추천 워크플로우
 
-### 옵션 A: Colab Code 확장 (간단)
-1. Cursor에 Colab Code 확장 설치
-2. Colab 노트북을 Cursor에서 열기
+### 옵션 A: Google Colab 확장 (간단)
+1. Cursor에 **Google Colab** 확장 설치
+2. `.ipynb` 열고 Select Kernel → Colab 선택
 3. Cursor AI로 코드 작성
-4. Colab 런타임에서 실행
+4. Colab 런타임에서 셀 실행
 
 ### 옵션 B: 파일 동기화 (유연함)
 1. Google Drive에 파일 업로드
@@ -177,20 +179,21 @@ Ctrl+Shift+P → "Colab: Open Notebook"
 
 ## 빠른 시작 체크리스트
 
-- [ ] Cursor 설치 완료
-- [ ] Colab Code 확장 설치
-- [ ] Google Drive에 프로젝트 파일 업로드
-- [ ] Colab 노트북 생성
-- [ ] Cursor에서 노트북 열기
-- [ ] 학습 코드 작성 및 실행
+- [ ] Cursor (또는 VS Code) 설치 완료
+- [ ] **Google Colab** 확장 설치
+- [ ] Google 로그인, Colab GPU 런타임 선택 가능 확인
+- [ ] (선택) Google Drive에 프로젝트 파일 업로드
+- [ ] Colab 노트북 생성 또는 기존 `.ipynb` 사용
+- [ ] Cursor에서 노트북 열기 → Kernel → Colab
+- [ ] 학습 코드 작성 및 Colab에서 실행
 
 ---
 
 ## 문제 해결
 
-### Colab Code 확장이 작동 안 할 때
-- VSCode/Cursor 재시작
-- 확장 재설치
+### Google Colab 확장이 작동 안 할 때
+- VSCode/Cursor 재시작 (또는 Reload Window)
+- **Google Colab** 확장 재설치
 - Google 계정 재로그인
 
 ### 파일을 찾을 수 없을 때

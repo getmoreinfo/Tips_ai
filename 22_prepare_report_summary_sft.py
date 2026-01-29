@@ -23,6 +23,7 @@ from ai_report_bullets_lib import (
     aggregate_category_with_reviews,
     CategoryMetrics,
 )
+from ai_report_bullets_lib import _extract_keywords_from_review_texts  # type: ignore
 from report_summary_lib import (
     build_market_overview_summary,
     build_growth_summary,
@@ -59,6 +60,78 @@ SYSTEM_PROMPT = (
 )
 
 
+def _truncate_text(s: Any, max_chars: int) -> str:
+    ss = str(s) if s is not None else ""
+    ss = " ".join(ss.split())
+    if max_chars and max_chars > 0 and len(ss) > max_chars:
+        return ss[: max_chars - 1] + "…"
+    return ss
+
+
+def _build_review_insights(
+    df_rev_cat: pd.DataFrame,
+    *,
+    top_keywords: int,
+    pos_examples: int,
+    neg_examples: int,
+    max_example_chars: int,
+    seed: int,
+) -> Optional[Dict[str, Any]]:
+    """
+    리뷰 텍스트 기반 인사이트를 user_input에 넣기 위한 요약.
+    - topKeywords: 상위 키워드(top_n)
+    - positiveExamples / negativeExamples: 대표 리뷰 문장 샘플
+    """
+    if df_rev_cat is None or df_rev_cat.empty:
+        return None
+    if "review_text" not in df_rev_cat.columns:
+        return None
+
+    texts = (
+        df_rev_cat["review_text"]
+        .dropna()
+        .astype(str)
+        .map(lambda x: _truncate_text(x, max_example_chars))
+        .tolist()
+    )
+    if not texts:
+        return None
+
+    kws = _extract_keywords_from_review_texts(texts, top_n=int(max(0, top_keywords)))
+
+    df = df_rev_cat.copy()
+    rating = pd.to_numeric(df.get("rating"), errors="coerce")
+    df["_rating"] = rating
+    df_pos = df[df["_rating"].notna() & (df["_rating"] >= 4)]
+    df_neg = df[df["_rating"].notna() & (df["_rating"] <= 2)]
+
+    rnd = random.Random(seed)
+
+    def _sample_texts(dff: pd.DataFrame, n: int) -> List[str]:
+        if n <= 0 or dff.empty:
+            return []
+        pool = (
+            dff["review_text"]
+            .dropna()
+            .astype(str)
+            .map(lambda x: _truncate_text(x, max_example_chars))
+            .tolist()
+        )
+        if not pool:
+            return []
+        if len(pool) <= n:
+            return pool
+        return rnd.sample(pool, k=n)
+
+    return {
+        "topKeywords": list(kws),
+        "positiveExamples": _sample_texts(df_pos, int(pos_examples)),
+        "negativeExamples": _sample_texts(df_neg, int(neg_examples)),
+        "hasReviewText": True,
+        "reviewTextCount": int(len(texts)),
+    }
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input_csv", default="products_all.csv")
@@ -78,6 +151,15 @@ def main() -> None:
         default=0.85,
         help="서브샘플링 비율",
     )
+    ap.add_argument(
+        "--use_review_text",
+        action="store_true",
+        help="리뷰 텍스트(review_text) 기반 reviewInsights(topKeywords/대표리뷰)를 user_input에 포함",
+    )
+    ap.add_argument("--review_top_keywords", type=int, default=10, help="reviewInsights.topKeywords 개수")
+    ap.add_argument("--review_pos_examples", type=int, default=3, help="긍정 리뷰 샘플 개수(평점>=4)")
+    ap.add_argument("--review_neg_examples", type=int, default=2, help="부정 리뷰 샘플 개수(평점<=2)")
+    ap.add_argument("--review_max_chars", type=int, default=180, help="대표 리뷰 샘플 최대 글자 수")
     ap.add_argument("--seed", type=int, default=42, help="재현을 위한 랜덤 시드")
     args = ap.parse_args()
 
@@ -202,6 +284,19 @@ def main() -> None:
                         for g in growth_metrics
                     ],
                 }
+
+                # (선택) 리뷰 텍스트 인사이트 추가: 키워드 + 대표 리뷰(긍정/부정)
+                if args.use_review_text:
+                    ri = _build_review_insights(
+                        df_rev_cat,
+                        top_keywords=int(args.review_top_keywords),
+                        pos_examples=int(args.review_pos_examples),
+                        neg_examples=int(args.review_neg_examples),
+                        max_example_chars=int(args.review_max_chars),
+                        seed=int(args.seed) + int(sample_idx),
+                    )
+                    if ri:
+                        user_input["reviewInsights"] = ri
 
                 # 출력 데이터 구성
                 target = {

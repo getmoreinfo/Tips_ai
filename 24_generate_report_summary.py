@@ -2,9 +2,12 @@
 24_generate_report_summary.py
 역할: 학습된 LoRA 모델을 사용하여 커머스 시장 리포트 요약 생성
 
-사용 예:
+사용 예 (DB):
   python 24_generate_report_summary.py --model_dir results_report/qwen2.5-3b-lora-report-summary --category_contains 유모차
   python 24_generate_report_summary.py --model_dir results_report/qwen2.5-3b-lora-report-summary --category_id 4
+
+사용 예 (CSV):
+  python 24_generate_report_summary.py --model_dir .../qwen2.5-7b-lora-report-summary --products_csv products_all.csv --reviews_csv reviews_all.csv --category_contains 유모차
 """
 
 from __future__ import annotations
@@ -13,15 +16,49 @@ import argparse
 import json
 import os
 import sys
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
+import pandas as pd
 import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from ai_report_bullets_lib import aggregate_category_with_reviews
-from db_category_loader import load_category_from_db
+from ai_report_bullets_lib import _extract_keywords_from_review_texts  # type: ignore
 from report_summary_lib import calculate_yearly_growth
+
+
+def _pick_category_from_df(
+    df_products: pd.DataFrame,
+    category_id: Optional[int],
+    category_contains: Optional[str],
+) -> Tuple[int, str, pd.DataFrame]:
+    """CSV 기반 카테고리 선택 (25와 동일 로직)."""
+    if (category_id is None) == (category_contains is None):
+        raise ValueError("--category_id 또는 --category_contains 중 하나만 지정해야 합니다.")
+    df = df_products.copy()
+    df["category_id"] = pd.to_numeric(df["category_id"], errors="coerce")
+    df = df[df["category_id"].notna()]
+
+    if category_id is not None:
+        cid = int(category_id)
+        g = df[df["category_id"].astype(int) == cid].copy()
+        if g.empty:
+            raise ValueError(f"category_id={cid}에 해당하는 상품이 없습니다.")
+        category_path = str(g["category"].dropna().iloc[0]) if g["category"].notna().any() else ""
+        return cid, category_path, g
+
+    needle = str(category_contains)
+    g = df[df["category"].astype(str).str.contains(needle, na=False)].copy()
+    if g.empty:
+        raise ValueError(f"category_contains='{needle}'에 해당하는 상품이 없습니다.")
+    best = None
+    for cid, gg in g.groupby("category_id", sort=False):
+        if best is None or len(gg) > len(best[2]):
+            cp = str(gg["category"].dropna().iloc[0]) if gg["category"].notna().any() else ""
+            best = (int(cid), cp, gg.copy())
+    assert best is not None
+    return best
 
 # 프록시 설정 제거
 os.environ.pop("HTTP_PROXY", None)
@@ -33,6 +70,8 @@ os.environ.pop("https_proxy", None)
 def _extract_json(text: str) -> Optional[Dict[str, Any]]:
     """텍스트에서 첫 번째 JSON 객체 추출"""
     text = text.strip()
+    # Qwen 계열이 가끔 끝 토큰을 그대로 출력
+    text = text.replace("<|im_end|>", "").strip()
     start = text.find("{")
     if start == -1:
         return None
@@ -50,6 +89,51 @@ def _extract_json(text: str) -> Optional[Dict[str, Any]]:
                     return None
     return None
 
+
+def _looks_like_json_object_string(s: Any) -> bool:
+    if not isinstance(s, str):
+        return False
+    ss = s.strip()
+    return ss.startswith("{") and ss.endswith("}") and (
+        "\"marketOverviewSummary\"" in ss or "\"growthSummary\"" in ss
+    )
+
+
+def _normalize_result_obj(obj: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    모델 출력이 깨지는 케이스를 최대한 복구:
+    - marketOverviewSummary 값이 JSON 문자열(\"{...}\") 형태로 중첩됨
+    - 문자열 안에 <|im_end|> 같은 토큰이 섞임
+    """
+    out: Dict[str, Any] = dict(obj)
+
+    # 1) 중첩 JSON 문자열 풀기
+    for k in ("marketOverviewSummary", "growthSummary"):
+        v = out.get(k)
+        if _looks_like_json_object_string(v):
+            try:
+                nested = json.loads(str(v))
+                if isinstance(nested, dict):
+                    for nk in ("marketOverviewSummary", "growthSummary"):
+                        if nk in nested and isinstance(nested[nk], str):
+                            out[nk] = nested[nk]
+            except Exception:
+                pass
+
+    # 2) 문자열 정리
+    for k in ("marketOverviewSummary", "growthSummary"):
+        v = out.get(k)
+        if isinstance(v, str):
+            vv = v.replace("<|im_end|>", "").strip()
+            out[k] = " ".join(vv.split())
+
+    # 3) 최소 키 보장
+    if "marketOverviewSummary" not in out or not isinstance(out["marketOverviewSummary"], str):
+        out["marketOverviewSummary"] = ""
+    if "growthSummary" not in out or not isinstance(out["growthSummary"], str):
+        out["growthSummary"] = ""
+
+    return out
 
 def _coerce_to_result_json(raw: str) -> Dict[str, Any]:
     """
@@ -103,6 +187,51 @@ def _coerce_to_result_json(raw: str) -> Dict[str, Any]:
     return {"marketOverviewSummary": mo, "growthSummary": gr}
 
 
+def _build_review_insights_for_inference(
+    df_reviews: pd.DataFrame,
+    *,
+    top_keywords: int = 10,
+    pos_examples: int = 3,
+    neg_examples: int = 2,
+    max_example_chars: int = 180,
+) -> Optional[Dict[str, Any]]:
+    if df_reviews is None or df_reviews.empty:
+        return None
+    if "review_text" not in df_reviews.columns:
+        return None
+
+    def _trunc(s: Any) -> str:
+        ss = str(s) if s is not None else ""
+        ss = " ".join(ss.split())
+        if max_example_chars and max_example_chars > 0 and len(ss) > max_example_chars:
+            return ss[: max_example_chars - 1] + "…"
+        return ss
+
+    texts = df_reviews["review_text"].dropna().astype(str).map(_trunc).tolist()
+    if not texts:
+        return None
+
+    kws = _extract_keywords_from_review_texts(texts, top_n=int(max(0, top_keywords)))
+
+    rating = pd.to_numeric(df_reviews.get("rating"), errors="coerce")
+    df_pos = df_reviews[rating.notna() & (rating >= 4)]
+    df_neg = df_reviews[rating.notna() & (rating <= 2)]
+
+    def _take_top(dff: pd.DataFrame, n: int) -> List[str]:
+        if n <= 0 or dff.empty:
+            return []
+        arr = dff["review_text"].dropna().astype(str).map(_trunc).tolist()
+        return arr[:n]
+
+    return {
+        "topKeywords": list(kws),
+        "positiveExamples": _take_top(df_pos, int(pos_examples)),
+        "negativeExamples": _take_top(df_neg, int(neg_examples)),
+        "hasReviewText": True,
+        "reviewTextCount": int(len(texts)),
+    }
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="학습된 모델로 커머스 시장 리포트 요약 생성"
@@ -110,6 +239,8 @@ def main() -> None:
     ap.add_argument("--model_dir", default=None, help="학습된 LoRA 모델 디렉토리 (--template_only일 때는 선택사항)")
     ap.add_argument("--category_id", type=int, default=None, help="카테고리 ID")
     ap.add_argument("--category_contains", default=None, help="카테고리 경로에 포함된 문자열")
+    ap.add_argument("--products_csv", default=None, help="상품 CSV (--reviews_csv와 함께 사용 시 DB 대신 CSV 사용)")
+    ap.add_argument("--reviews_csv", default=None, help="리뷰 CSV (--products_csv와 함께 사용 시 DB 대신 CSV 사용)")
     ap.add_argument("--template_only", action="store_true", help="템플릿 기반 생성 (모델 없이)")
     ap.add_argument("--max_length", type=int, default=4096, help="최대 생성 길이")
     args = ap.parse_args()
@@ -120,15 +251,38 @@ def main() -> None:
     if not args.template_only and not args.model_dir:
         ap.error("--template_only가 아닐 때는 --model_dir이 필요합니다.")
 
+    use_csv = bool(args.products_csv and args.reviews_csv)
+
     # 데이터 로드
-    try:
-        df_products, df_reviews, category_id, category_path = load_category_from_db(
-            category_id=args.category_id,
-            category_contains=args.category_contains,
-        )
-    except Exception as e:
-        print(f"[ERROR] DB 조회 실패: {e}", file=sys.stderr)
-        sys.exit(1)
+    if use_csv:
+        try:
+            df_products = pd.read_csv(args.products_csv)
+            df_reviews = pd.read_csv(args.reviews_csv)
+            cat_id, category_path, df_cat = _pick_category_from_df(
+                df_products,
+                category_id=args.category_id,
+                category_contains=args.category_contains,
+            )
+            product_ids = set(pd.to_numeric(df_cat["id"], errors="coerce").dropna().astype(int).tolist())
+            prod_ids_series = pd.to_numeric(df_reviews["product_id"], errors="coerce")
+            df_rev_cat = df_reviews[prod_ids_series.isin(product_ids)].copy()
+            df_products = df_cat
+            df_reviews = df_rev_cat
+            category_id = cat_id
+        except Exception as e:
+            print(f"[ERROR] CSV 로드/카테고리 선택 실패: {e}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        try:
+            from db_category_loader import load_category_from_db
+
+            df_products, df_reviews, category_id, category_path = load_category_from_db(
+                category_id=args.category_id,
+                category_contains=args.category_contains,
+            )
+        except Exception as e:
+            print(f"[ERROR] DB 조회 실패: {e}", file=sys.stderr)
+            sys.exit(1)
 
     # 메트릭스 계산
     metrics = aggregate_category_with_reviews(
@@ -244,6 +398,11 @@ def main() -> None:
         ],
     }
 
+    # (중요) 리뷰 텍스트 인사이트: 22(SFT)와 입력 구조를 맞춰 모델이 리뷰 근거를 활용하도록 함
+    ri = _build_review_insights_for_inference(df_reviews)
+    if ri:
+        user_input["reviewInsights"] = ri
+
     # 시스템 프롬프트 (학습 시와 동일)
     system_prompt = (
         "너는 커머스 시장 리포트를 작성하는 시니어 컨설팅 애널리스트다. "
@@ -308,6 +467,8 @@ def main() -> None:
     if not result_json:
         # JSON을 못 지키면 출력 텍스트를 최소한으로 복구해 JSON으로 반환
         result_json = _coerce_to_result_json(answer)
+    else:
+        result_json = _normalize_result_obj(result_json)
 
     result_json["categoryId"] = category_id
     result_json["categoryName"] = metrics.category_name
