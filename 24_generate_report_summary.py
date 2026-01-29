@@ -455,8 +455,8 @@ def main() -> None:
     print(f"Base model: {base_model}")
     print(f"LoRA adapter: {args.model_dir}")
 
-    # 토크나이저 로드
-    tokenizer = AutoTokenizer.from_pretrained(args.model_dir, use_fast=True)
+    # 토크나이저: adapter 디렉터리에는 vocab 등이 없을 수 있으므로 base_model(메타데이터)에서 로드
+    tokenizer = AutoTokenizer.from_pretrained(base_model, use_fast=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
