@@ -17,8 +17,8 @@ results_category/
 logs/
 logs_category/
 
-# Large data files
-products_all.csv
+# Large data files (products_all.csv는 저장소에 포함)
+# products_all.csv
 
 # OS
 .DS_Store
