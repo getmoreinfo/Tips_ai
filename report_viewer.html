@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>카테고리 리포트 뷰어</title>
+    <style>
+      :root {
+        --bg: #0b0f14;
+        --panel: #111823;
+        --text: #e6edf3;
+        --muted: #9aa7b4;
+        --grid: rgba(255,255,255,0.08);
+        --accent: #7aa2ff;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", Arial, sans-serif;
+      }
+      header {
+        padding: 16px 20px;
+        border-bottom: 1px solid rgba(255,255,255,0.06);
+        position: sticky;
+        top: 0;
+        background: rgba(11, 15, 20, 0.9);
+        backdrop-filter: blur(10px);
+      }
+      header .row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .title {
+        font-weight: 700;
+        letter-spacing: -0.2px;
+      }
+      .badge {
+        font-size: 12px;
+        padding: 4px 8px;
+        border: 1px solid rgba(255,255,255,0.16);
+        border-radius: 999px;
+        color: var(--muted);
+      }
+      main {
+        padding: 18px 20px 28px;
+        max-width: 1100px;
+        margin: 0 auto;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 16px;
+      }
+      @media (min-width: 980px) {
+        .grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 14px;
+        padding: 14px;
+      }
+      .card h2 {
+        margin: 0 0 10px;
+        font-size: 14px;
+        color: var(--muted);
+        font-weight: 600;
+      }
+      canvas {
+        width: 100%;
+        height: 320px;
+        display: block;
+      }
+      .summary {
+        margin-top: 10px;
+        color: var(--text);
+        line-height: 1.6;
+        font-size: 14px;
+      }
+      .meta {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .legend {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px 10px;
+        margin-top: 10px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .swatch {
+        width: 10px;
+        height: 10px;
+        border-radius: 3px;
+        flex: 0 0 10px;
+      }
+      .controls {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      input[type="text"] {
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 10px;
+        padding: 8px 10px;
+        color: var(--text);
+        width: min(560px, 100%);
+      }
+      button {
+        background: rgba(122,162,255,0.14);
+        border: 1px solid rgba(122,162,255,0.35);
+        color: var(--text);
+        border-radius: 10px;
+        padding: 8px 12px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button:hover {
+        background: rgba(122,162,255,0.2);
+      }
+      .error {
+        margin-top: 10px;
+        color: #ff8a8a;
+        font-size: 13px;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="row">
+        <div class="title">카테고리 리포트 뷰어</div>
+        <div id="catBadge" class="badge">-</div>
+        <div class="controls">
+          <input id="jsonPath" type="text" spellcheck="false" />
+          <button id="loadBtn">불러오기</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <div class="grid">
+        <section class="card">
+          <h2 id="brandTitle">Top10 브랜드 (리뷰 기반 점유율)</h2>
+          <canvas id="donut"></canvas>
+          <div id="donutLegend" class="legend"></div>
+          <div id="marketSummary" class="summary"></div>
+          <div id="assumptions" class="meta"></div>
+        </section>
+
+        <section class="card">
+          <h2 id="growthTitle">성장 추세 (가상 매출: 리뷰→판매/매출 환산)</h2>
+          <canvas id="line"></canvas>
+          <div id="growthMeta" class="meta"></div>
+          <div id="growthSummary" class="summary"></div>
+        </section>
+      </div>
+
+      <div id="err" class="error"></div>
+    </main>
+
+    <script>
+      const PALETTE = [
+        "#7aa2ff", "#f2a365", "#a1d99b", "#e07a5f", "#b8c0ff",
+        "#f7d794", "#6ccff6", "#f6b93b", "#b39ddb", "#ff6b6b"
+      ];
+
+      function qs(name) {
+        const url = new URL(window.location.href);
+        return url.searchParams.get(name);
+      }
+
+      function setErr(msg) {
+        document.getElementById("err").textContent = msg || "";
+      }
+
+      function fmtNumber(n) {
+        if (n === null || n === undefined || Number.isNaN(n)) return "-";
+        return new Intl.NumberFormat("ko-KR").format(n);
+      }
+
+      function fmtPct(x) {
+        if (x === null || x === undefined || Number.isNaN(x)) return "-";
+        return (x * 100).toFixed(1) + "%";
+      }
+
+      function deviceRatioCanvas(canvas) {
+        const ratio = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = Math.floor(rect.width * ratio);
+        canvas.height = Math.floor(rect.height * ratio);
+        const ctx = canvas.getContext("2d");
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+        return ctx;
+      }
+
+      function drawDonut(canvas, items) {
+        const ctx = deviceRatioCanvas(canvas);
+        const w = canvas.getBoundingClientRect().width;
+        const h = canvas.getBoundingClientRect().height;
+        ctx.clearRect(0, 0, w, h);
+
+        const cx = w * 0.5;
+        const cy = h * 0.5;
+        const rOuter = Math.min(w, h) * 0.36;
+        const rInner = rOuter * 0.62;
+
+        const total = items.reduce((s, it) => s + (it.value || 0), 0) || 1;
+        let a = -Math.PI / 2;
+
+        // background ring
+        ctx.beginPath();
+        ctx.arc(cx, cy, rOuter, 0, Math.PI * 2);
+        ctx.arc(cx, cy, rInner, 0, Math.PI * 2, true);
+        ctx.fillStyle = "rgba(255,255,255,0.05)";
+        ctx.fill("evenodd");
+
+        items.forEach((it, idx) => {
+          const v = it.value || 0;
+          const frac = v / total;
+          const da = frac * Math.PI * 2;
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.arc(cx, cy, rOuter, a, a + da);
+          ctx.closePath();
+          ctx.arc(cx, cy, rInner, a + da, a, true);
+          ctx.fillStyle = PALETTE[idx % PALETTE.length];
+          ctx.fill("evenodd");
+          a += da;
+        });
+
+        // center label
+        ctx.fillStyle = "rgba(255,255,255,0.92)";
+        ctx.font = "600 14px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Noto Sans KR, Arial";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("TOP10", cx, cy - 8);
+        ctx.fillStyle = "rgba(255,255,255,0.7)";
+        ctx.font = "12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Noto Sans KR, Arial";
+        ctx.fillText("브랜드 점유", cx, cy + 12);
+      }
+
+      function drawLine(canvas, points) {
+        const ctx = deviceRatioCanvas(canvas);
+        const w = canvas.getBoundingClientRect().width;
+        const h = canvas.getBoundingClientRect().height;
+        ctx.clearRect(0, 0, w, h);
+
+        const padL = 42, padR = 14, padT = 18, padB = 32;
+        const x0 = padL, x1 = w - padR;
+        const y0 = h - padB, y1 = padT;
+
+        // values: estimatedRevenue
+        const ys = points.map(p => Number(p.estimatedRevenue || 0));
+        const minY = Math.min(...ys, 0);
+        const maxY = Math.max(...ys, 1);
+        const span = Math.max(1, maxY - minY);
+
+        const xs = points.map((p, i) => i);
+        const minX = 0, maxX = Math.max(1, xs.length - 1);
+
+        // grid
+        ctx.strokeStyle = "rgba(255,255,255,0.08)";
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 4; i++) {
+          const y = y1 + ((y0 - y1) * i) / 4;
+          ctx.beginPath();
+          ctx.moveTo(x0, y);
+          ctx.lineTo(x1, y);
+          ctx.stroke();
+        }
+
+        function pxX(i) {
+          if (maxX === minX) return x0;
+          return x0 + ((x1 - x0) * (i - minX)) / (maxX - minX);
+        }
+        function pxY(v) {
+          return y0 - ((y0 - y1) * (v - minY)) / span;
+        }
+
+        // line
+        ctx.strokeStyle = PALETTE[0];
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        points.forEach((p, i) => {
+          const x = pxX(i);
+          const y = pxY(Number(p.estimatedRevenue || 0));
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+
+        // points
+        ctx.fillStyle = "#ffffff";
+        points.forEach((p, i) => {
+          const x = pxX(i);
+          const y = pxY(Number(p.estimatedRevenue || 0));
+          ctx.beginPath();
+          ctx.arc(x, y, 3.4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(x, y, 6.0, 0, Math.PI * 2);
+          ctx.strokeStyle = "rgba(122,162,255,0.35)";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        });
+
+        // axes labels (years)
+        ctx.fillStyle = "rgba(255,255,255,0.7)";
+        ctx.font = "12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Noto Sans KR, Arial";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        points.forEach((p, i) => {
+          const x = pxX(i);
+          ctx.fillText(String(p.year), x, y0 + 8);
+        });
+
+        // y labels (min/max)
+        ctx.textAlign = "right";
+        ctx.textBaseline = "middle";
+        ctx.fillText(fmtNumber(Math.round(maxY)), x0 - 8, y1);
+        ctx.fillText(fmtNumber(Math.round(minY)), x0 - 8, y0);
+      }
+
+      function render(report) {
+        const badge = document.getElementById("catBadge");
+        badge.textContent = `카테고리: ${report.categoryName} (ID ${report.categoryId})`;
+        document.getElementById("brandTitle").textContent =
+          `Top10 브랜드 (리뷰 기반 점유율 · ${report.categoryName})`;
+        document.getElementById("growthTitle").textContent =
+          `성장 추세 (가상 매출 · ${report.categoryName})`;
+
+        const donut = document.getElementById("donut");
+        const items = report?.charts?.brandTop10Donut?.items || [];
+        drawDonut(donut, items);
+
+        const legend = document.getElementById("donutLegend");
+        legend.innerHTML = "";
+        items.forEach((it, idx) => {
+          const el = document.createElement("div");
+          el.className = "legend-item";
+          const sw = document.createElement("span");
+          sw.className = "swatch";
+          sw.style.background = PALETTE[idx % PALETTE.length];
+          const txt = document.createElement("span");
+          txt.textContent = `${it.name} · ${fmtNumber(it.value)} · ${fmtPct(it.share)}`;
+          el.appendChild(sw);
+          el.appendChild(txt);
+          legend.appendChild(el);
+        });
+
+        document.getElementById("marketSummary").textContent = report?.summaries?.marketOverviewSummary || "";
+        document.getElementById("growthSummary").textContent = report?.summaries?.growthSummary || "";
+
+        const a = report?.assumptions || {};
+        document.getElementById("assumptions").textContent =
+          `가정: 리뷰 수(proxy) 기반 · unitsPerReview=${a.unitsPerReview ?? "-"} · priceRef=${a.priceRef ? fmtNumber(a.priceRef) : "-"}`;
+
+        const points = report?.charts?.growthLine?.points || [];
+        drawLine(document.getElementById("line"), points);
+
+        const last = points.length ? points[points.length - 1] : null;
+        const meta = last
+          ? `최근 연도(${last.year}) 기준: 추정 판매 ${fmtNumber(last.estimatedUnits)} · 추정 매출 ${fmtNumber(Math.round(last.estimatedRevenue))} · YoY ${last.growthRate === null || last.growthRate === undefined ? "-" : last.growthRate.toFixed(1) + "%"}`
+          : "성장 데이터가 없습니다.";
+        document.getElementById("growthMeta").textContent = meta;
+      }
+
+      async function load(path) {
+        setErr("");
+        const res = await fetch(path, { cache: "no-store" });
+        if (!res.ok) throw new Error(`불러오기 실패: ${res.status} ${res.statusText}`);
+        const j = await res.json();
+        return j;
+      }
+
+      async function boot() {
+        const defaultPath = qs("json") || "report_stroller.json";
+        const input = document.getElementById("jsonPath");
+        input.value = defaultPath;
+
+        async function doLoad() {
+          try {
+            const report = await load(input.value.trim());
+            render(report);
+          } catch (e) {
+            setErr(String(e?.stack || e));
+          }
+        }
+
+        document.getElementById("loadBtn").addEventListener("click", doLoad);
+        window.addEventListener("resize", () => doLoad());
+        await doLoad();
+      }
+
+      boot();
+    </script>
+  </body>
+</html>
+

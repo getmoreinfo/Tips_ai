@@ -180,13 +180,32 @@ def _aggregate_segments(df_cat: pd.DataFrame) -> List[Tuple[str, int]]:
 
 
 def _extract_keywords_from_review_texts(
-    texts: List[str], top_n: int = 10, min_len: int = 2
+    texts: List[str], top_n: int = 10, min_len: int = 2, max_texts: int = 10000
 ) -> List[Tuple[str, int]]:
-    """리뷰 텍스트에서 키워드(한글 2자 이상 등) 빈도 추출."""
-    combined = " ".join(str(t).strip() for t in texts if t is not None and str(t).strip())
-    ko_tokens = re.findall(r"[가-힣]{2,}", combined)
-    en_tokens = [t.lower() for t in re.findall(r"[a-zA-Z]{2,}", combined)]
-    all_tokens = [t for t in ko_tokens + en_tokens if t and not t.isdigit()]
+    """리뷰 텍스트에서 키워드(한글 2자 이상 등) 빈도 추출.
+    
+    메모리 효율을 위해 최대 max_texts개만 처리합니다.
+    """
+    # 메모리 효율: 너무 많은 텍스트는 샘플링
+    if len(texts) > max_texts:
+        import random
+        texts = random.sample(texts, max_texts)
+    
+    # 청크 단위로 처리하여 메모리 사용량 제한
+    chunk_size = 1000
+    all_tokens = []
+    
+    for i in range(0, len(texts), chunk_size):
+        chunk = texts[i:i + chunk_size]
+        combined = " ".join(str(t).strip() for t in chunk if t is not None and str(t).strip())
+        if not combined:
+            continue
+        
+        ko_tokens = re.findall(r"[가-힣]{2,}", combined)
+        en_tokens = [t.lower() for t in re.findall(r"[a-zA-Z]{2,}", combined)]
+        chunk_tokens = [t for t in ko_tokens + en_tokens if t and not t.isdigit()]
+        all_tokens.extend(chunk_tokens)
+    
     if not all_tokens:
         return []
     cnt = Counter(all_tokens)

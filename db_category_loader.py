@@ -39,6 +39,76 @@ def get_crawlingdb_config() -> dict:
     }
 
 
+def load_all_categories_from_db(
+    min_products: int = 10,
+    max_categories: int = 1000,
+) -> List[Tuple[pd.DataFrame, pd.DataFrame, int, str]]:
+    """
+    DB에서 모든 카테고리의 상품+리뷰를 조회해 리스트로 반환.
+    
+    Args:
+        min_products: 카테고리당 최소 상품 수
+        max_categories: 최대 카테고리 수
+    
+    Returns:
+        [(df_products, df_reviews, category_id, category_path), ...] 리스트
+    """
+    cfg = get_crawlingdb_config()
+    if not all([cfg["host"], cfg["port"], cfg["user"], cfg["password"]]):
+        raise RuntimeError(
+            "DB 연결 정보가 부족합니다. .env에 PGHOST, PGPORT, PGUSER, PGPASSWORD를 설정하세요."
+        )
+    conn = psycopg2.connect(**cfg)
+    
+    try:
+        schema = _schema()
+        ptab = _products_table()
+        rtab = _reviews_table()
+        
+        # 카테고리별 상품 수 조회
+        q_cats = f"""
+            SELECT category_id, category, COUNT(*) as cnt
+            FROM {schema}.{ptab}
+            WHERE category_id IS NOT NULL 
+                AND category IS NOT NULL
+            GROUP BY category_id, category
+            HAVING COUNT(*) >= %s
+            ORDER BY cnt DESC
+            LIMIT %s
+        """
+        df_cats = pd.read_sql(q_cats, conn, params=(min_products, max_categories))
+        
+        results = []
+        for _, row in df_cats.iterrows():
+            cat_id = int(row["category_id"])
+            cat_path = str(row["category"])
+            
+            # 해당 카테고리 상품 조회
+            q_prod = f"""
+                SELECT * FROM {schema}.{ptab}
+                WHERE category_id = %s
+            """
+            df_products = pd.read_sql(q_prod, conn, params=(cat_id,))
+            
+            # 해당 상품들의 리뷰 조회
+            product_ids = df_products["id"].astype(int).tolist()
+            if product_ids:
+                placeholders = ",".join(["%s"] * len(product_ids))
+                q_rev = f"""
+                    SELECT * FROM {schema}.{rtab}
+                    WHERE product_id IN ({placeholders})
+                """
+                df_reviews = pd.read_sql(q_rev, conn, params=tuple(product_ids))
+            else:
+                df_reviews = pd.DataFrame()
+            
+            results.append((df_products, df_reviews, cat_id, cat_path))
+        
+        return results
+    finally:
+        conn.close()
+
+
 def load_category_from_db(
     category_id: Optional[int] = None,
     category_contains: Optional[str] = None,
