@@ -133,28 +133,37 @@ def _build_review_insights(
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(
+        description="SFT 학습용 JSONL 생성. A100 등 대량 학습용 기본값(샘플 많음)."
+    )
     ap.add_argument("--input_csv", default="products_all.csv")
     ap.add_argument("--reviews_csv", default="reviews_all.csv")
     ap.add_argument("--out_jsonl", default="training_report_summary_sft.jsonl")
     ap.add_argument("--min_products", type=int, default=10, help="카테고리당 최소 상품 수")
-    ap.add_argument("--max_categories", type=int, default=1000, help="최대 카테고리 수")
+    ap.add_argument("--max_categories", type=int, default=3000, help="최대 카테고리 수 (학습량 많게)")
     ap.add_argument(
         "--samples_per_category",
         type=int,
-        default=10,
-        help="카테고리당 생성할 학습 샘플 수",
+        default=100,
+        help="카테고리당 생성할 학습 샘플 수 (많을수록 학습량 증가)",
     )
     ap.add_argument(
         "--subsample_ratio",
         type=float,
-        default=0.85,
+        default=0.9,
         help="서브샘플링 비율",
     )
     ap.add_argument(
         "--use_review_text",
         action="store_true",
-        help="리뷰 텍스트(review_text) 기반 reviewInsights(topKeywords/대표리뷰)를 user_input에 포함",
+        default=True,
+        help="리뷰 텍스트 기반 reviewInsights 포함 (기본 True)",
+    )
+    ap.add_argument(
+        "--no_use_review_text",
+        action="store_false",
+        dest="use_review_text",
+        help="reviewInsights 비활성화",
     )
     ap.add_argument("--review_top_keywords", type=int, default=10, help="reviewInsights.topKeywords 개수")
     ap.add_argument("--review_pos_examples", type=int, default=3, help="긍정 리뷰 샘플 개수(평점>=4)")

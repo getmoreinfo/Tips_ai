@@ -93,21 +93,24 @@ def _build_train_example(example: Dict[str, Any], tokenizer, max_length: int) ->
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--base_model", default="Qwen/Qwen2.5-3B-Instruct")
+    ap = argparse.ArgumentParser(
+        description="Qwen2.5 LoRA 학습. A100 등 대용량 GPU 기준 기본값(학습량 많음)."
+    )
+    ap.add_argument("--base_model", default="Qwen/Qwen2.5-7B-Instruct", help="베이스 모델 (7B 권장)")
     ap.add_argument("--train_jsonl", default="training_report_summary_sft.jsonl")
-    ap.add_argument("--out_dir", default="results_report/qwen2.5-3b-lora-report-summary")
-    # 8GB급 GPU에서는 4096이 크래시(드라이버/메모리)로 떨어질 수 있어 기본을 2048로 보수적으로 설정
-    ap.add_argument("--max_length", type=int, default=2048, help="학습 시 최대 시퀀스 길이 (8GB GPU는 2048 권장)")
-    ap.add_argument("--epochs", type=int, default=3)
-    ap.add_argument("--lr", type=float, default=2e-4)
-    ap.add_argument("--batch_size", type=int, default=1)
-    ap.add_argument("--grad_accum", type=int, default=16)
-    # 8GB 환경에서는 LoRA rank를 낮추면 메모리 여유가 생김
-    ap.add_argument("--lora_r", type=int, default=8, help="LoRA rank (8GB GPU는 4~8 권장)")
-    ap.add_argument("--lora_alpha", type=int, default=16, help="LoRA alpha (보통 2*r 근처 권장)")
-    ap.add_argument("--save_steps", type=int, default=200)
+    ap.add_argument("--out_dir", default="results_report/qwen2.5-7b-lora-report-summary")
+    # A100(40GB+) 기준: 긴 시퀀스 + 대배치
+    ap.add_argument("--max_length", type=int, default=4096, help="최대 시퀀스 길이 (A100 권장 4096)")
+    ap.add_argument("--epochs", type=int, default=10, help="학습 에폭 (A100에서 많이 돌리기)")
+    ap.add_argument("--lr", type=float, default=1e-4, help="학습률")
+    ap.add_argument("--batch_size", type=int, default=4, help="디바이스당 배치 (A100에서 4~8)")
+    ap.add_argument("--grad_accum", type=int, default=8, help="그래디언트 누적 (effective batch = batch_size * grad_accum)")
+    ap.add_argument("--lora_r", type=int, default=32, help="LoRA rank (A100에서 16~64)")
+    ap.add_argument("--lora_alpha", type=int, default=64, help="LoRA alpha (보통 2*r)")
+    ap.add_argument("--save_steps", type=int, default=500)
+    ap.add_argument("--save_total_limit", type=int, default=3, help="유지할 체크포인트 수")
     ap.add_argument("--logging_steps", type=int, default=10)
+    ap.add_argument("--warmup_ratio", type=float, default=0.05, help="워밍업 비율")
     args = ap.parse_args()
 
     _require_peft()
@@ -190,7 +193,8 @@ def main() -> None:
         num_train_epochs=args.epochs,
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
-        save_total_limit=2,
+        save_total_limit=args.save_total_limit,
+        warmup_ratio=args.warmup_ratio,
         report_to="none",
         fp16=use_fp16,
         bf16=use_bf16,
@@ -223,6 +227,8 @@ def main() -> None:
         "lr": args.lr,
         "batch_size": args.batch_size,
         "grad_accum": args.grad_accum,
+        "lora_r": args.lora_r,
+        "lora_alpha": args.lora_alpha,
     }
     with open(os.path.join(args.out_dir, "training_metadata.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)

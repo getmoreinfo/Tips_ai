@@ -140,16 +140,16 @@ def _clean_summary_text(s: str, max_sentences: int = 12) -> str:
             if pos != -1:
                 break
         if pos != -1:
-            # 값 시작: ": " 또는 \":\" 다음의 따옴표 뒤
+            # 값 시작: ": " 또는 \":\" 다음의 따옴표 뒤 (JSON 파싱된 문자열은 \" 형태)
             after_key = pos + len(key_pattern)
             val_start = -1
-            for q in ('": "', '\\":\\"', '":"'):
+            for q in ('\\":\\"', '": "', '":"', ':\\"'):
                 i = s.find(q, after_key)
                 if i != -1:
                     val_start = i + len(q)
                     break
             if val_start > 0:
-                end_markers = ["群", "与你", "\", \"growthSummary\"", "\\\", \\\"growthSummary\\\"", "\", \"marketOverviewSummary\""]
+                end_markers = ["群", "与", "与你", "\", \"growthSummary\"", "\\\", \\\"growthSummary\\\"", "\", \"marketOverviewSummary\""]
                 val_end = len(s)
                 for m in end_markers:
                     i = s.find(m, val_start)
@@ -519,18 +519,10 @@ def main() -> None:
         ],
     }
 
-    # (중요) 리뷰 텍스트 인사이트: 22(SFT)와 입력 구조를 맞춰 모델이 리뷰 근거를 활용하도록 함
+    # 리뷰 텍스트 인사이트: 22(SFT)와 입력 구조를 맞춰 모델이 리뷰 근거를 활용하도록 함
     ri = _build_review_insights_for_inference(df_reviews)
     if ri:
         user_input["reviewInsights"] = ri
-        print(f"[DEBUG] reviewInsights 포함됨: 키워드 {len(ri.get('topKeywords', []))}개, 긍정예시 {len(ri.get('positiveExamples', []))}개, 부정예시 {len(ri.get('negativeExamples', []))}개")
-    else:
-        text_col = _review_text_column(df_reviews) if df_reviews is not None and not df_reviews.empty else None
-        n_reviews = len(df_reviews) if df_reviews is not None else 0
-        n_nonempty = 0
-        if text_col is not None and df_reviews is not None and not df_reviews.empty:
-            n_nonempty = int((df_reviews[text_col].dropna().astype(str).str.strip() != "").sum())
-        print(f"[DEBUG] reviewInsights 없음: 카테고리 리뷰 수={n_reviews}, 리뷰텍스트 컬럼={text_col!r}, 비어있지 않은 텍스트 수={n_nonempty}")
 
     # 시스템 프롬프트 (학습 시와 동일)
     system_prompt = (
