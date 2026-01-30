@@ -364,6 +364,7 @@ def main() -> None:
     ap.add_argument("--reviews_csv", default=None, help="리뷰 CSV (--products_csv와 함께 사용 시 DB 대신 CSV 사용)")
     ap.add_argument("--template_only", action="store_true", help="템플릿 기반 생성 (모델 없이)")
     ap.add_argument("--max_length", type=int, default=4096, help="최대 생성 길이")
+    ap.add_argument("--out_json", default=None, help="결과 JSON 저장 경로 (지정 시 stdout 대신 파일로 출력)")
     args = ap.parse_args()
 
     if not args.category_id and not args.category_contains:
@@ -435,7 +436,11 @@ def main() -> None:
             "marketOverviewSummary": market_overview,
             "growthSummary": growth_summary,
         }
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if args.out_json:
+            with open(args.out_json, "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+        else:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
         return
 
     # 모델 모드
@@ -593,7 +598,11 @@ def main() -> None:
 
     result_json["categoryId"] = category_id
     result_json["categoryName"] = metrics.category_name
-    print(json.dumps(result_json, ensure_ascii=False, indent=2))
+    if args.out_json:
+        with open(args.out_json, "w", encoding="utf-8") as f:
+            json.dump(result_json, f, ensure_ascii=False, indent=2)
+    else:
+        print(json.dumps(result_json, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

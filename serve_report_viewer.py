@@ -15,7 +15,8 @@ def main() -> None:
     # 워크스페이스 루트에서 실행되는 것을 전제로, 현재 폴더를 그대로 서빙한다.
     root = os.getcwd()
     print(f"[OK] serving: {root}")
-    print(f"[OK] open: http://127.0.0.1:{args.port}/report_viewer.html?json=report_stroller.json")
+    print(f"[OK] PM 데모(한 페이지): http://127.0.0.1:{args.port}/pm_demo.html")
+    print(f"[OK] 리포트 뷰어: http://127.0.0.1:{args.port}/report_viewer.html?json=report_stroller.json")
     print("     (json 파라미터를 다른 파일로 바꾸면 됩니다)")
 
     class Handler(SimpleHTTPRequestHandler):

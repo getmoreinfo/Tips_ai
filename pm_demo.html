@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI-TR · PM 데모</title>
+  <style>
+    :root {
+      --bg: #f6f8fa;
+      --panel: #ffffff;
+      --border: #d8dee4;
+      --text: #1f2328;
+      --muted: #656d76;
+      --accent: #0969da;
+      --accent-bg: #ddf4ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", Roboto, sans-serif;
+      line-height: 1.5;
+    }
+    .container { max-width: 960px; margin: 0 auto; padding: 24px 20px 48px; }
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 20px 24px;
+    }
+    header h1 { margin: 0 0 6px; font-size: 1.5rem; font-weight: 700; }
+    header p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin-top: 20px;
+    }
+    section h2 {
+      margin: 0 0 14px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text);
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    ul { margin: 0; padding-left: 1.2rem; }
+    li { margin: 6px 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+    th { font-weight: 600; color: var(--muted); background: var(--bg); }
+    .notice {
+      background: var(--accent-bg);
+      border: 1px solid rgba(9, 105, 218, 0.3);
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-top: 16px;
+      font-size: 0.9rem;
+      color: var(--text);
+    }
+    .summary-text {
+      font-size: 0.9rem;
+      line-height: 1.65;
+      color: var(--text);
+      white-space: pre-wrap;
+      margin: 10px 0 0;
+    }
+    .meta { font-size: 0.8rem; color: var(--muted); margin-top: 8px; }
+    .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 16px; }
+    @media (max-width: 700px) { .chart-row { grid-template-columns: 1fr; } }
+    .chart-wrap { background: var(--bg); border-radius: 8px; padding: 16px; }
+    .chart-wrap h3 { margin: 0 0 12px; font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+    canvas { width: 100%; height: 240px; display: block; }
+    .legend { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 10px; font-size: 0.8rem; color: var(--muted); }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .legend .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .load-hint { font-size: 0.85rem; color: var(--muted); margin-top: 12px; }
+    .load-hint a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <h1>AI-TR: 카테고리 리포트 요약</h1>
+      <p>다나와 스타일 상품·리뷰 데이터 → 카테고리별 시장 개요 요약(marketOverviewSummary) 생성 · Qwen2.5-7B LoRA SFT</p>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h2>사용 모델</h2>
+      <ul>
+        <li><strong>베이스 모델</strong>: Qwen/Qwen2.5-7B-Instruct (Hugging Face, 7B 파라미터)</li>
+        <li><strong>미세조정</strong>: LoRA(PEFT) — adapter만 학습, 베이스 모델은 고정</li>
+        <li><strong>채택 이유</strong>: 리뷰 텍스트 기반 인사이트(사용 시나리오·맥락)까지 반영하려면 문장 논리·표현이 필요해 7B로 확장. LoRA로 메모리·저장을 줄이면서 태스크에 맞게 조정.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>파이프라인</h2>
+      <table>
+        <thead>
+          <tr><th>단계</th><th>스크립트</th><th>역할</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td>21_export_products_reviews_from_db.py</td><td>DB → CSV 추출</td></tr>
+          <tr><td>2</td><td>22_prepare_report_summary_sft.py</td><td>SFT용 JSONL 생성</td></tr>
+          <tr><td>3</td><td>23_train_report_summary_lora.py</td><td>Qwen2.5-7B LoRA 학습</td></tr>
+          <tr><td>4</td><td>24_generate_report_summary.py</td><td>학습된 adapter로 요약 생성</td></tr>
+          <tr><td>5</td><td>25_generate_category_report_from_csv.py</td><td>CSV 기반 전체 리포트 JSON 생성</td></tr>
+          <tr><td>6</td><td>26_evaluate_report_summary.py</td><td>요약 품질 평가</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>리포트 샘플 (아기띠/외출용품)</h2>
+      <p class="meta">아래는 25번 스크립트로 생성한 JSON을 시각화한 예시입니다. 리뷰 수를 대리 지표(proxy)로 사용한 상대적 구조 해석 결과입니다.</p>
+      <div class="chart-row">
+        <div class="chart-wrap">
+          <h3>Top10 브랜드 (리뷰 기반 점유율)</h3>
+          <canvas id="donut"></canvas>
+          <div id="donutLegend" class="legend"></div>
+        </div>
+        <div class="chart-wrap">
+          <h3>성장 추세 (가상 매출)</h3>
+          <canvas id="line"></canvas>
+          <div id="lineMeta" class="meta"></div>
+        </div>
+      </div>
+      <h3 style="margin: 18px 0 8px; font-size: 0.95rem;">시장 개요 요약</h3>
+      <div id="marketSummary" class="summary-text"></div>
+      <h3 style="margin: 18px 0 8px; font-size: 0.95rem;">성장 요약</h3>
+      <div id="growthSummary" class="summary-text"></div>
+      <div class="notice">
+        ※ 본 리포트의 매출·점유·성장 수치는 실제 거래 데이터가 아니라, 리뷰 수를 대리 지표(proxy)로 활용한 상대적 구조 해석 결과입니다.
+      </div>
+      <p class="load-hint">전체 리포트 뷰어(다른 JSON 불러오기): <a href="report_viewer.html?json=report_stroller.json">report_viewer.html</a> · 로컬 서버: <code>python serve_report_viewer.py</code></p>
+    </section>
+  </main>
+
+  <script>
+    const PALETTE = ["#0969da", "#cf222e", "#1a7f37", "#9a6700", "#8250df", "#c24c00", "#0e8a16", "#fb8500", "#656d76", "#ff6b6b"];
+
+    const SAMPLE_REPORT = {
+      "categoryId": 4,
+      "categoryName": "아기띠/외출용품",
+      "charts": {
+        "brandTop10Donut": {
+          "items": [
+            {"name": "순성산업", "value": 3187, "share": 0.184},
+            {"name": "리안", "value": 2994, "share": 0.173},
+            {"name": "폴레드", "value": 1682, "share": 0.097},
+            {"name": "부가부", "value": 930, "share": 0.054},
+            {"name": "베이비뵨", "value": 916, "share": 0.053},
+            {"name": "브라이텍스", "value": 583, "share": 0.034},
+            {"name": "보니숑", "value": 469, "share": 0.027},
+            {"name": "싸이벡스", "value": 456, "share": 0.026},
+            {"name": "토드비", "value": 441, "share": 0.026},
+            {"name": "조이", "value": 436, "share": 0.025}
+          ]
+        },
+        "growthLine": { "unit": "estimatedRevenue", "points": [] }
+      },
+      "summaries": {
+        "marketOverviewSummary": "본 분석은 아기띠/외출용품 카테고리에서 수집된 리뷰 수를 실제 매출 대신 판매 규모와 점유를 가늠하기 위한 대리 지표로 활용해 구조를 추정한 결과입니다. 리뷰 기준 상위 3개 브랜드 비중이 45.5% 수준으로 리더 그룹과 후발 주자가 공존하는 시장이며, HHI는 약 831 수준으로 여러 브랜드가 비슷한 비중으로 경쟁하는 구조에 가깝습니다. 가중 평균 평점은 4.7점 수준으로 품질·경험에 대한 만족도가 안정적인 편입니다.",
+        "growthSummary": "연도별 성장 데이터가 부족하여 성장 추세를 분석할 수 없습니다."
+      },
+      "assumptions": { "proxy": "review_count", "unitsPerReview": 3.0, "priceRef": 67500.0 }
+    };
+
+    function fmtNum(n) {
+      if (n == null || Number.isNaN(n)) return "-";
+      return new Intl.NumberFormat("ko-KR").format(n);
+    }
+    function fmtPct(x) {
+      if (x == null || Number.isNaN(x)) return "-";
+      return (x * 100).toFixed(1) + "%";
+    }
+
+    function setupCanvas(canvas) {
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = Math.floor(rect.width * dpr);
+      canvas.height = Math.floor(rect.height * dpr);
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+      return { ctx, w: rect.width, h: rect.height };
+    }
+
+    function drawDonut(canvas, items) {
+      const { ctx, w, h } = setupCanvas(canvas);
+      ctx.clearRect(0, 0, w, h);
+      const cx = w / 2, cy = h / 2;
+      const rOut = Math.min(w, h) * 0.38, rIn = rOut * 0.6;
+      const total = items.reduce((s, it) => s + (it.value || 0), 0) || 1;
+      let a = -Math.PI / 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rOut, 0, Math.PI * 2);
+      ctx.arc(cx, cy, rIn, 0, Math.PI * 2, true);
+      ctx.fillStyle = "#eaeef2";
+      ctx.fill("evenodd");
+      items.forEach((it, i) => {
+        const frac = (it.value || 0) / total;
+        const da = frac * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, rOut, a, a + da);
+        ctx.closePath();
+        ctx.arc(cx, cy, rIn, a + da, a, true);
+        ctx.fillStyle = PALETTE[i % PALETTE.length];
+        ctx.fill("evenodd");
+        a += da;
+      });
+      ctx.fillStyle = "#1f2328";
+      ctx.font = "600 14px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("TOP10", cx, cy - 6);
+      ctx.fillStyle = "#656d76";
+      ctx.font = "12px system-ui, sans-serif";
+      ctx.fillText("브랜드 점유", cx, cy + 10);
+    }
+
+    function drawLine(canvas, points) {
+      const { ctx, w, h } = setupCanvas(canvas);
+      ctx.clearRect(0, 0, w, h);
+      if (!points || points.length === 0) {
+        ctx.fillStyle = "#656d76";
+        ctx.font = "13px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("성장 데이터 없음", w / 2, h / 2);
+        return;
+      }
+      const padL = 36, padR = 12, padT = 12, padB = 28;
+      const x0 = padL, x1 = w - padR, y0 = h - padB, y1 = padT;
+      const ys = points.map(p => Number(p.estimatedRevenue || 0));
+      const minY = Math.min(...ys, 0), maxY = Math.max(...ys, 1);
+      const span = Math.max(1, maxY - minY);
+      const n = points.length, maxX = Math.max(1, n - 1);
+      function pxX(i) { return x0 + ((x1 - x0) * i) / maxX; }
+      function pxY(v) { return y0 - ((y0 - y1) * (v - minY)) / span; }
+      ctx.strokeStyle = "#d8dee4";
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const y = y1 + ((y0 - y1) * i) / 4;
+        ctx.beginPath();
+        ctx.moveTo(x0, y);
+        ctx.lineTo(x1, y);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = PALETTE[0];
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      points.forEach((p, i) => {
+        const x = pxX(i), y = pxY(Number(p.estimatedRevenue || 0));
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.fillStyle = "#fff";
+      points.forEach((p, i) => {
+        const x = pxX(i), y = pxY(Number(p.estimatedRevenue || 0));
+        ctx.beginPath();
+        ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = PALETTE[0];
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      });
+      ctx.fillStyle = "#656d76";
+      ctx.font = "11px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      points.forEach((p, i) => { ctx.fillText(String(p.year), pxX(i), y0 + 6); });
+    }
+
+    function render(report) {
+      const items = report?.charts?.brandTop10Donut?.items || [];
+      drawDonut(document.getElementById("donut"), items);
+      const legend = document.getElementById("donutLegend");
+      legend.innerHTML = "";
+      items.forEach((it, i) => {
+        const s = document.createElement("span");
+        s.innerHTML = `<span class="dot" style="background:${PALETTE[i % PALETTE.length]}"></span> ${it.name} ${fmtNum(it.value)} (${fmtPct(it.share)})`;
+        legend.appendChild(s);
+      });
+      const points = report?.charts?.growthLine?.points || [];
+      drawLine(document.getElementById("line"), points);
+      const last = points[points.length - 1];
+      document.getElementById("lineMeta").textContent = last
+        ? `최근: ${last.year}년 · 추정 매출 ${fmtNum(Math.round(last.estimatedRevenue))} · YoY ${last.growthRate != null ? last.growthRate.toFixed(1) + "%" : "-"}`
+        : "성장 데이터 없음.";
+      document.getElementById("marketSummary").textContent = report?.summaries?.marketOverviewSummary || "-";
+      document.getElementById("growthSummary").textContent = report?.summaries?.growthSummary || "-";
+    }
+
+    render(SAMPLE_REPORT);
+  </script>
+</body>
+</html>
