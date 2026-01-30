@@ -10,15 +10,6 @@
   python 21_export_products_reviews_from_db.py
   python 21_export_products_reviews_from_db.py --all          # 카테고리 필터 없이 전부
   python 21_export_products_reviews_from_db.py --out_dir ./data
-
-.env 예시:
-  PGHOST=localhost
-  PGPORT=5432
-  PGUSER=your_user
-  PGPASSWORD=your_password
-  PGSCHEMA=public1
-  PGTABLE=products
-  PGREVIEWSTABLE=reviews
 """
 
 from __future__ import annotations

@@ -60,6 +60,7 @@ Qwen2.5-7B LoRA SFT로 리뷰 텍스트 기반 인사이트(키워드·세그먼
 | **보고·설명** | `일일보고_연구일지_김민수_2026_01_29.md`, `일일보고_연구일지_2026_01_29_예상QA.md` |
 | **Colab 실행** | `colab_run_all.py` / `colab_run_all.ipynb` (선택) |
 
+**파이프라인 각 코드 상세 설명**은 **docs/PIPELINE_CODE_GUIDE.md** 에 정리해 두었습니다.  
 **상세 가이드(Colab 설정, GPU, Mac 설정 등)**는 **docs/** 폴더에 정리해 두었습니다. → **docs/README.md** 에서 목록 확인.
 
 ---
